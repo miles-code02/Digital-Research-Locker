@@ -379,3 +379,42 @@
     (ok true)
   )
 )
+
+;; #[allow(unchecked_data)]
+(define-public (transfer-ownership (document-id uint) (new-owner principal))
+  (let
+    (
+      (doc (unwrap! (map-get? documents document-id) err-not-found))
+      (old-owner (get owner doc))
+    )
+    (asserts! (is-eq tx-sender old-owner) err-unauthorized)
+    (asserts! (not (is-eq new-owner old-owner)) err-invalid-input)
+    (asserts! (not (is-document-locked document-id)) err-document-locked)
+    (map-set documents document-id (merge doc { owner: new-owner }))
+    (map-set user-document-count old-owner (- (get-user-document-count old-owner) u1))
+    (map-set user-document-count new-owner (+ (get-user-document-count new-owner) u1))
+    (ok true)
+  )
+)
+
+;; #[allow(unchecked_data)]
+(define-public (update-document-title (document-id uint) (new-title (string-ascii 100)))
+  (let
+    (
+      (doc (unwrap! (map-get? documents document-id) err-not-found))
+    )
+    (asserts! (is-eq tx-sender (get owner doc)) err-unauthorized)
+    (asserts! (not (is-document-locked document-id)) err-document-locked)
+    (map-set documents document-id (merge doc { title: new-title }))
+    (ok true)
+  )
+)
+
+;; #[allow(unchecked_data)]
+(define-public (set-platform-fee (new-fee uint))
+  (begin
+    (asserts! (is-eq tx-sender contract-owner) err-unauthorized)
+    (var-set platform-fee new-fee)
+    (ok true)
+  )
+)
