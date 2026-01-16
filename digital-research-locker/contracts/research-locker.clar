@@ -271,3 +271,111 @@
     (ok new-version)
   )
 )
+
+;; Additional Constants
+(define-constant err-document-locked (err u104))
+(define-constant err-insufficient-permissions (err u105))
+
+;; Additional Data Maps
+(define-map user-starred-documents
+  { user: principal, document-id: uint }
+  bool
+)
+
+(define-map document-lock-status
+  uint
+  { locked: bool, locked-until: uint }
+)
+
+;; Additional Data Variables
+(define-data-var total-citations uint u0)
+(define-data-var platform-fee uint u0)
+
+;; Additional Read-only Functions
+(define-read-only (is-document-starred (user principal) (document-id uint))
+  (default-to false (map-get? user-starred-documents { user: user, document-id: document-id }))
+)
+
+(define-read-only (is-document-locked (document-id uint))
+  (match (map-get? document-lock-status document-id)
+    lock-info (and (get locked lock-info) (> (get locked-until lock-info) stacks-block-height))
+    false
+  )
+)
+
+(define-read-only (get-total-citations)
+  (var-get total-citations)
+)
+
+(define-read-only (get-platform-fee)
+  (var-get platform-fee)
+)
+
+;; Public Functions
+;; #[allow(unchecked_data)]
+(define-public (star-document (document-id uint))
+  (let
+    (
+      (doc (unwrap! (map-get? documents document-id) err-not-found))
+    )
+    (asserts! (or (get public doc) (has-access document-id tx-sender)) err-unauthorized)
+    (map-set user-starred-documents
+      { user: tx-sender, document-id: document-id }
+      true
+    )
+    (ok true)
+  )
+)
+
+;; #[allow(unchecked_data)]
+(define-public (unstar-document (document-id uint))
+  (begin
+    (map-delete user-starred-documents { user: tx-sender, document-id: document-id })
+    (ok true)
+  )
+)
+
+;; #[allow(unchecked_data)]
+(define-public (increment-citations (document-id uint))
+  (let
+    (
+      (doc (unwrap! (map-get? documents document-id) err-not-found))
+      (metadata (unwrap! (map-get? document-metadata document-id) err-not-found))
+      (current-citations (get citations metadata))
+    )
+    (asserts! (or (get public doc) (has-access document-id tx-sender)) err-unauthorized)
+    (map-set document-metadata document-id
+      (merge metadata { citations: (+ current-citations u1) })
+    )
+    (var-set total-citations (+ (var-get total-citations) u1))
+    (ok true)
+  )
+)
+
+;; #[allow(unchecked_data)]
+(define-public (lock-document (document-id uint) (lock-blocks uint))
+  (let
+    (
+      (doc (unwrap! (map-get? documents document-id) err-not-found))
+    )
+    (asserts! (is-eq tx-sender (get owner doc)) err-unauthorized)
+    (map-set document-lock-status document-id
+      { locked: true, locked-until: (+ stacks-block-height lock-blocks) }
+    )
+    (ok true)
+  )
+)
+
+;; #[allow(unchecked_data)]
+(define-public (unlock-document (document-id uint))
+  (let
+    (
+      (doc (unwrap! (map-get? documents document-id) err-not-found))
+    )
+    (asserts! (is-eq tx-sender (get owner doc)) err-unauthorized)
+    (map-set document-lock-status document-id
+      { locked: false, locked-until: u0 }
+    )
+    (ok true)
+  )
+)
