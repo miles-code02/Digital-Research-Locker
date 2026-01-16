@@ -149,3 +149,125 @@
         true)
     false)
 )
+
+;; Additional Constants
+(define-constant err-already-exists (err u102))
+(define-constant err-invalid-input (err u103))
+
+;; Additional Data Maps
+(define-map document-metadata
+  uint
+  {
+    keywords: (string-ascii 200),
+    category: (string-ascii 50),
+    version: uint,
+    citations: uint
+  }
+)
+
+(define-map document-collaborators
+  { document-id: uint, collaborator: principal }
+  { role: (string-ascii 20), added-at: uint }
+)
+
+(define-map document-versions
+  { document-id: uint, version: uint }
+  { hash: (string-ascii 64), timestamp: uint, updated-by: principal }
+)
+
+;; Additional Read-only Functions
+(define-read-only (get-document-metadata (document-id uint))
+  (map-get? document-metadata document-id)
+)
+
+(define-read-only (get-collaborator-info (document-id uint) (collaborator principal))
+  (map-get? document-collaborators { document-id: document-id, collaborator: collaborator })
+)
+
+(define-read-only (get-document-version (document-id uint) (version uint))
+  (map-get? document-versions { document-id: document-id, version: version })
+)
+
+(define-read-only (is-collaborator (document-id uint) (user principal))
+  (is-some (map-get? document-collaborators { document-id: document-id, collaborator: user }))
+)
+
+;; Public Functions
+;; #[allow(unchecked_data)]
+(define-public (add-metadata
+  (document-id uint)
+  (keywords (string-ascii 200))
+  (category (string-ascii 50)))
+  (let
+    (
+      (doc (unwrap! (map-get? documents document-id) err-not-found))
+    )
+    (asserts! (is-eq tx-sender (get owner doc)) err-unauthorized)
+    (map-set document-metadata document-id
+      {
+        keywords: keywords,
+        category: category,
+        version: u1,
+        citations: u0
+      }
+    )
+    (ok true)
+  )
+)
+
+;; #[allow(unchecked_data)]
+(define-public (add-collaborator
+  (document-id uint)
+  (collaborator principal)
+  (role (string-ascii 20)))
+  (let
+    (
+      (doc (unwrap! (map-get? documents document-id) err-not-found))
+    )
+    (asserts! (is-eq tx-sender (get owner doc)) err-unauthorized)
+    (asserts! (not (is-eq collaborator (get owner doc))) err-invalid-input)
+    (map-set document-collaborators
+      { document-id: document-id, collaborator: collaborator }
+      { role: role, added-at: stacks-block-height }
+    )
+    (ok true)
+  )
+)
+
+;; #[allow(unchecked_data)]
+(define-public (remove-collaborator
+  (document-id uint)
+  (collaborator principal))
+  (let
+    (
+      (doc (unwrap! (map-get? documents document-id) err-not-found))
+    )
+    (asserts! (is-eq tx-sender (get owner doc)) err-unauthorized)
+    (map-delete document-collaborators { document-id: document-id, collaborator: collaborator })
+    (ok true)
+  )
+)
+
+;; #[allow(unchecked_data)]
+(define-public (update-document-version
+  (document-id uint)
+  (new-hash (string-ascii 64)))
+  (let
+    (
+      (doc (unwrap! (map-get? documents document-id) err-not-found))
+      (metadata (unwrap! (map-get? document-metadata document-id) err-not-found))
+      (current-version (get version metadata))
+      (new-version (+ current-version u1))
+    )
+    (asserts! (is-eq tx-sender (get owner doc)) err-unauthorized)
+    (asserts! (not (is-document-locked document-id)) err-document-locked)
+    (map-set document-versions
+      { document-id: document-id, version: new-version }
+      { hash: new-hash, timestamp: stacks-block-height, updated-by: tx-sender }
+    )
+    (map-set document-metadata document-id
+      (merge metadata { version: new-version })
+    )
+    (ok new-version)
+  )
+)
